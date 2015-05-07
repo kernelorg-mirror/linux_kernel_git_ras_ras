@@ -66,6 +66,9 @@ static void __init bert_print_all(struct acpi_hest_generic_status *region,
 			first = 0;
 		}
 		cper_estatus_print(KERN_INFO HW_ERR, estatus);
+
+		/* Clear error status */
+		estatus->block_status = 0;
 next:
 		estatus = (void *)estatus + estatus_len;
 		remain -= estatus_len;
