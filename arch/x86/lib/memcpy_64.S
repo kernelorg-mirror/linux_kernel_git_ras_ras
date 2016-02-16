@@ -177,3 +177,154 @@ ENTRY(memcpy_orig)
 .Lend:
 	retq
 ENDPROC(memcpy_orig)
+
+#ifndef CONFIG_UML
+/*
+ * __mcsafe_copy - memory copy with machine check exception handling
+ * Note that we only catch machine checks when reading the source addresses.
+ * Writes to target are posted and don't generate machine checks.
+ */
+ENTRY(__mcsafe_copy)
+	cmpl $8,%edx
+	jb 20f		/* less then 8 bytes, go to byte copy loop */
+
+	/* check for bad alignment of source */
+	testl $7,%esi
+	/* already aligned */
+	jz 102f
+
+	/* copy one byte at a time until source is 8-byte aligned */
+	movl %esi,%ecx
+	andl $7,%ecx
+	subl $8,%ecx
+	negl %ecx
+	subl %ecx,%edx
+0:	movb (%rsi),%al
+	movb %al,(%rdi)
+	incq %rsi
+	incq %rdi
+	decl %ecx
+	jnz 0b
+
+102:
+	/* Figure out how many whole cache lines (64-bytes) to copy */
+	movl %edx,%ecx
+	andl $63,%edx
+	shrl $6,%ecx
+	jz 17f
+
+	/* Loop copying whole cache lines */
+1:	movq (%rsi),%r8
+2:	movq 1*8(%rsi),%r9
+3:	movq 2*8(%rsi),%r10
+4:	movq 3*8(%rsi),%r11
+	movq %r8,(%rdi)
+	movq %r9,1*8(%rdi)
+	movq %r10,2*8(%rdi)
+	movq %r11,3*8(%rdi)
+9:	movq 4*8(%rsi),%r8
+10:	movq 5*8(%rsi),%r9
+11:	movq 6*8(%rsi),%r10
+12:	movq 7*8(%rsi),%r11
+	movq %r8,4*8(%rdi)
+	movq %r9,5*8(%rdi)
+	movq %r10,6*8(%rdi)
+	movq %r11,7*8(%rdi)
+	leaq 64(%rsi),%rsi
+	leaq 64(%rdi),%rdi
+	decl %ecx
+	jnz 1b
+
+	/* Are there any trailing 8-byte words? */
+17:	movl %edx,%ecx
+	andl $7,%edx
+	shrl $3,%ecx
+	jz 20f
+
+	/* Copy trailing words */
+18:	movq (%rsi),%r8
+	mov %r8,(%rdi)
+	leaq 8(%rsi),%rsi
+	leaq 8(%rdi),%rdi
+	decl %ecx
+	jnz 18b
+
+	/* Any trailing bytes? */
+20:	andl %edx,%edx
+	jz 23f
+
+	/* copy trailing bytes */
+	movl %edx,%ecx
+21:	movb (%rsi),%al
+	movb %al,(%rdi)
+	incq %rsi
+	incq %rdi
+	decl %ecx
+	jnz 21b
+
+	/* Copy successful. Return .remain = 0, .trapnr = 0 */
+23:	xorq %rax, %rax
+	xorq %rdx, %rdx
+	ret
+
+	.section .fixup,"ax"
+	/*
+	 * machine check handler loaded %rax with trap number
+	 * We just need to make sure %edx has the number of
+	 * bytes remaining
+	 */
+30:
+	add %ecx,%edx
+	ret
+31:
+	shl $6,%ecx
+	add %ecx,%edx
+	ret
+32:
+	shl $6,%ecx
+	lea -8(%ecx,%edx),%edx
+	ret
+33:
+	shl $6,%ecx
+	lea -16(%ecx,%edx),%edx
+	ret
+34:
+	shl $6,%ecx
+	lea -24(%ecx,%edx),%edx
+	ret
+35:
+	shl $6,%ecx
+	lea -32(%ecx,%edx),%edx
+	ret
+36:
+	shl $6,%ecx
+	lea -40(%ecx,%edx),%edx
+	ret
+37:
+	shl $6,%ecx
+	lea -48(%ecx,%edx),%edx
+	ret
+38:
+	shl $6,%ecx
+	lea -56(%ecx,%edx),%edx
+	ret
+39:
+	lea (%rdx,%rcx,8),%rdx
+	ret
+40:
+	mov %ecx,%edx
+	ret
+	.previous
+
+	_ASM_EXTABLE_FAULT(0b,30b)
+	_ASM_EXTABLE_FAULT(1b,31b)
+	_ASM_EXTABLE_FAULT(2b,32b)
+	_ASM_EXTABLE_FAULT(3b,33b)
+	_ASM_EXTABLE_FAULT(4b,34b)
+	_ASM_EXTABLE_FAULT(9b,35b)
+	_ASM_EXTABLE_FAULT(10b,36b)
+	_ASM_EXTABLE_FAULT(11b,37b)
+	_ASM_EXTABLE_FAULT(12b,38b)
+	_ASM_EXTABLE_FAULT(18b,39b)
+	_ASM_EXTABLE_FAULT(21b,40b)
+#endif
